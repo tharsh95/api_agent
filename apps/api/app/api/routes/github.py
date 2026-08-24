@@ -4,6 +4,8 @@ from fastapi import (
     HTTPException,
     Request,
 )
+import httpx
+import uuid
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -269,4 +271,99 @@ async def select_repository(
             ),
             "url": repository.url,
         },
+    }
+
+
+@router.get("/repositories/{repository_id}/contents")
+async def get_repository_contents(
+    repository_id: uuid.UUID,
+    request: Request,
+    path: str = "",
+    ref: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="No authenticated user found",
+        )
+
+    result = await db.execute(
+        select(Repository)
+        .join(Project, Repository.project_id == Project.id)
+        .where(
+            Repository.id == repository_id,
+            Project.user_id == user_id,
+        )
+    )
+
+    repository = result.scalar_one_or_none()
+
+    if not repository:
+        raise HTTPException(
+            status_code=404,
+            detail="Repository not found",
+        )
+
+    result = await db.execute(
+        select(GitHubInstallation).where(
+            GitHubInstallation.user_id == user_id
+        )
+    )
+
+    installation = result.scalar_one_or_none()
+
+    if not installation:
+        raise HTTPException(
+            status_code=404,
+            detail="GitHub installation not found",
+        )
+
+    token_data = (
+        await github_service.create_installation_access_token(
+            installation.installation_id
+        )
+    )
+
+    installation_token = token_data.get("token")
+
+    if not installation_token:
+        raise HTTPException(
+            status_code=502,
+            detail="GitHub installation token was not returned",
+        )
+
+    try:
+        contents = await github_service.get_repository_contents(
+            installation_token=installation_token,
+            owner=repository.owner,
+            repo=repository.name,
+            path=path,
+            ref=ref or repository.default_branch,
+        )
+
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail="Repository path not found",
+            ) from exc
+
+        raise HTTPException(
+            status_code=502,
+            detail="GitHub API request failed",
+        ) from exc
+
+    return {
+        "repository": {
+            "id": str(repository.id),
+            "owner": repository.owner,
+            "name": repository.name,
+            "default_branch": repository.default_branch,
+        },
+        "path": path,
+        "ref": ref or repository.default_branch,
+        "contents": contents,
     }

@@ -27,7 +27,7 @@ class GitHubService:
         payload = {
             "iat": now - 60,
             "exp": now + (9 * 60),
-            "iss": settings.github_app_id,
+            "iss": str(settings.github_app_id),
         }
 
         return jwt.encode(
@@ -135,6 +135,33 @@ class GitHubService:
             installation_token,
         )
 
+    async def get_repository_contents(
+        self,
+        installation_token: str,
+        owner: str,
+        repo: str,
+        path: str = "",
+        ref: str | None = None,
+    ) -> list | dict:
+        """
+        Get repository contents from GitHub.
+
+        Returns either:
+        - a list when path points to a directory
+        - a dict when path points to a file
+        """
+
+        params = {}
+
+        if ref:
+            params["ref"] = ref
+
+        return await self._get_installation(
+            f"/repos/{owner}/{repo}/contents/{path}",
+            installation_token,
+            params=params,
+        )
+
     async def _get(
         self,
         path: str,
@@ -161,7 +188,8 @@ class GitHubService:
         self,
         path: str,
         installation_token: str,
-    ) -> dict:
+        params: dict | None = None,
+    ) -> dict | list:
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
@@ -173,6 +201,7 @@ class GitHubService:
                     ),
                     "X-GitHub-Api-Version": GITHUB_API_VERSION,
                 },
+                params=params,
             )
 
         response.raise_for_status()
