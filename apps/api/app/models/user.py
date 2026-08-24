@@ -47,7 +47,12 @@ class User(Base):
         onupdate=func.now(),
     )
     projects = relationship(
-    "Project",
-    back_populates="user",
-    cascade="all, delete-orphan",
-)
+        "Project",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    github_installations = relationship(
+        "GitHubInstallation",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

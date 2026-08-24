@@ -7,7 +7,7 @@ from app.models.document_chunk import DocumentChunk
 from app.models.agent_run import AgentRun
 from app.models.code_change import CodeChange
 from app.models.pull_request import PullRequest
-
+from app.models.github_installation import GitHubInstallation
 __all__ = [
     "User",
     "Project",
@@ -18,4 +18,5 @@ __all__ = [
     "AgentRun",
     "CodeChange",
     "PullRequest",
+    "GitHubInstallation"
 ]
