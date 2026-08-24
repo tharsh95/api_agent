@@ -34,6 +34,18 @@ class Document(Base):
         nullable=False,
     )
 
+    github_path: Mapped[str | None] = mapped_column(
+        String(1000),
+        nullable=True,
+        index=True,
+    )
+
+    github_sha: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

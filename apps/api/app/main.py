@@ -42,6 +42,7 @@ async def vector_health():
         }
 from app.api.routes.auth import router as auth_router
 from app.api.routes.github import router as github_router
+from app.api.routes.ingestion import router as ingestion_router
 
 app.include_router(
     auth_router,
@@ -49,5 +50,9 @@ app.include_router(
 )
 app.include_router(
     github_router,
+    prefix="/api",
+)
+app.include_router(
+    ingestion_router,
     prefix="/api",
 )
