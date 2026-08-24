@@ -41,8 +41,13 @@ async def vector_health():
             "pgvector_version": version,
         }
 from app.api.routes.auth import router as auth_router
+from app.api.routes.github import router as github_router
 
 app.include_router(
     auth_router,
+    prefix="/api",
+)
+app.include_router(
+    github_router,
     prefix="/api",
 )

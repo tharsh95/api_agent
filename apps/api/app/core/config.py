@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = None
 
-    github_app_id: int
+    github_app_id: str
     github_client_id: str
     github_client_secret: str
     github_private_key_path: str
