@@ -14,9 +14,15 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = None
 
-    github_client_id: str | None = None
-    github_client_secret: str | None = None
-    github_redirect_uri: str | None = None
+    github_app_id: int
+    github_client_id: str
+    github_client_secret: str
+    github_private_key_path: str
+    github_redirect_uri: str
+
+    session_secret: str
+    token_encryption_key: str
+
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
