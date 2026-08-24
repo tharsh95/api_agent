@@ -8,8 +8,10 @@ from app.core.config import settings
 
 
 GITHUB_API_URL = "https://api.github.com"
-GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
-GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
+GITHUB_TOKEN_URL = (
+    "https://github.com/login/oauth/access_token"
+)
+GITHUB_API_VERSION = "2026-03-10"
 
 
 class GitHubService:
@@ -65,7 +67,10 @@ class GitHubService:
 
         if "error" in data:
             raise ValueError(
-                data.get("error_description", data["error"])
+                data.get(
+                    "error_description",
+                    data["error"],
+                )
             )
 
         return data
@@ -90,6 +95,46 @@ class GitHubService:
             access_token,
         )
 
+    async def create_installation_access_token(
+        self,
+        installation_id: int,
+    ) -> dict:
+        """
+        Generate a short-lived access token for
+        a GitHub App installation.
+        """
+
+        app_jwt = self.create_app_jwt()
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{GITHUB_API_URL}/app/installations/"
+                f"{installation_id}/access_tokens",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {app_jwt}",
+                    "X-GitHub-Api-Version": GITHUB_API_VERSION,
+                },
+            )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    async def get_installation_repositories(
+        self,
+        installation_token: str,
+    ) -> dict:
+        """
+        Get repositories accessible to the GitHub App
+        installation.
+        """
+
+        return await self._get_installation(
+            "/installation/repositories",
+            installation_token,
+        )
+
     async def _get(
         self,
         path: str,
@@ -101,8 +146,32 @@ class GitHubService:
                 f"{GITHUB_API_URL}{path}",
                 headers={
                     "Accept": "application/vnd.github+json",
-                    "Authorization": f"Bearer {access_token}",
-                    "X-GitHub-Api-Version": "2026-03-10",
+                    "Authorization": (
+                        f"Bearer {access_token}"
+                    ),
+                    "X-GitHub-Api-Version": GITHUB_API_VERSION,
+                },
+            )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    async def _get_installation(
+        self,
+        path: str,
+        installation_token: str,
+    ) -> dict:
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{GITHUB_API_URL}{path}",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": (
+                        f"Bearer {installation_token}"
+                    ),
+                    "X-GitHub-Api-Version": GITHUB_API_VERSION,
                 },
             )
 
