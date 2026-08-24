@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,26 +39,6 @@ class GitHubInstallation(Base):
     account_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-    )
-
-    access_token_encrypted: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-    )
-
-    refresh_token_encrypted: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    access_token_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
-    refresh_token_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
