@@ -1,4 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+)
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,13 +30,19 @@ class RepositorySelectRequest(BaseModel):
 
 @router.get("/repositories")
 async def get_repositories(
+    request: Request,
     db: AsyncSession = Depends(get_db),
-):
-    # Temporary development user.
-    # Replace with real application authentication later.
+):    
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="No authenticated user found",
+        )
+    
     result = await db.execute(
         select(User).where(
-            User.github_id == "66423396"
+            User.id == user_id
         )
     )
 
@@ -105,13 +116,20 @@ async def get_repositories(
 
 @router.post("/repositories/select")
 async def select_repository(
+    request: Request,
     payload: RepositorySelectRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    # Temporary development user.
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="No authenticated user found",
+        )
+
     result = await db.execute(
         select(User).where(
-            User.github_id == "66423396"
+            User.id == user_id
         )
     )
 
