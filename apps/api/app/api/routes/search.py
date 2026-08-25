@@ -111,8 +111,9 @@ async def search_project(
     results = await vector_search_service.search(
         db=db,
         project_id=project_id,
+        query=query,
         query_embedding=query_embedding,
-    top_k=payload.top_k,
+        top_k=payload.top_k,
 )
 
     return {

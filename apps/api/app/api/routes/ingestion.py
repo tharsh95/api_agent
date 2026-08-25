@@ -45,3 +45,31 @@ async def ingest_project_files(
         user_id=authenticated_user_id,
         paths=payload.paths,
     )
+
+@router.post("/{project_id}/sync")
+async def sync_project_repository(
+    project_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="No authenticated user found",
+        )
+
+    try:
+        authenticated_user_id = uuid.UUID(user_id)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authenticated user",
+        ) from exc
+
+    return await ingestion_service.sync_repository(
+        db=db,
+        project_id=project_id,
+        user_id=authenticated_user_id,
+    )
