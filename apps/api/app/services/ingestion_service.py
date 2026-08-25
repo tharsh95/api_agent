@@ -12,8 +12,8 @@ from app.models.github_installation import GitHubInstallation
 from app.models.knowledge_source import KnowledgeSource
 from app.models.project import Project
 from app.models.repository import Repository
-from app.services.github_service import GitHubService
 from app.services.chunking_service import ChunkingService
+from app.services.github_service import GitHubService
 
 
 class IngestionService:
@@ -117,78 +117,106 @@ class IngestionService:
         documents_created = 0
         chunks_created = 0
 
-        # 6. Fetch and ingest each file
-        for file_path in paths:
+        # Empty paths means ingest the whole repository.
+        if not paths:
+            paths = [""]
 
-            contents = await self.github_service.get_repository_contents(
-                installation_token=installation_token,
-                owner=repository.owner,
-                repo=repository.name,
-                path=file_path,
-                ref=repository.default_branch,
+        # Track files we've already visited.
+        visited_paths: set[str] = set()
+
+        async def ingest_path(
+            file_path: str,
+        ) -> None:
+            nonlocal documents_created
+            nonlocal chunks_created
+
+            if file_path in visited_paths:
+                return
+
+            visited_paths.add(file_path)
+
+            contents = (
+                await self.github_service
+                .get_repository_contents(
+                    installation_token=installation_token,
+                    owner=repository.owner,
+                    repo=repository.name,
+                    path=file_path,
+                    ref=repository.default_branch,
+                )
             )
 
+            # Directory
+            if isinstance(contents, list):
+                for item in contents:
+                    item_path = item.get("path")
+                    item_type = item.get("type")
+
+                    if not item_path:
+                        continue
+
+                    if item_type == "dir":
+                        await ingest_path(item_path)
+
+                    elif item_type == "file":
+                        await ingest_path(item_path)
+
+                return
+
+            # Anything other than a file is invalid.
             if not isinstance(contents, dict):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Path '{file_path}' is not a file"
-                    ),
-                )
+                return
 
             if contents.get("type") != "file":
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Path '{file_path}' is not a file"
-                    ),
-                )
+                return
 
             encoded_content = contents.get("content")
 
             if not encoded_content:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"GitHub returned no content for "
-                        f"'{file_path}'"
-                    ),
-                )
+                return
+
+            # GitHub sometimes returns whitespace/newline characters
+            # around the base64 content.
+            encoded_content = encoded_content.replace(
+                "\n",
+                "",
+            )
 
             try:
                 decoded_content = base64.b64decode(
                     encoded_content
                 ).decode("utf-8")
+
             except (
                 binascii.Error,
                 UnicodeDecodeError,
-            ) as exc:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Unable to decode '{file_path}'"
-                    ),
-                ) from exc
+            ):
+                # Skip binary/non-UTF-8 files.
+                return
 
             github_sha = contents.get("sha")
 
             result = await db.execute(
                 select(Document).where(
-                    Document.knowledge_source_id == knowledge_source.id,
+                    Document.knowledge_source_id
+                    == knowledge_source.id,
                     Document.github_path == file_path,
                 )
             )
 
-            existing_document = result.scalar_one_or_none()
+            existing_document = (
+                result.scalar_one_or_none()
+            )
 
-            # File has not changed since the last ingestion.
+            # File has not changed.
             if (
                 existing_document
-                and existing_document.github_sha == github_sha
+                and existing_document.github_sha
+                == github_sha
             ):
-                continue
+                return
 
-            # File exists but has changed.
+            # File changed.
             if existing_document:
                 await db.delete(existing_document)
                 await db.flush()
@@ -206,12 +234,14 @@ class IngestionService:
 
             documents_created += 1
 
-            # 8. Chunk document
+            # Chunk document.
             chunks = self.chunking_service.split(
                 decoded_content
             )
 
-            for chunk_index, chunk_content in enumerate(chunks):
+            for chunk_index, chunk_content in enumerate(
+                chunks
+            ):
                 chunk = DocumentChunk(
                     document_id=document.id,
                     chunk_index=chunk_index,
@@ -219,17 +249,23 @@ class IngestionService:
                     metadata_={
                         "source": "github",
                         "path": file_path,
-                        "sha": contents.get("sha"),
+                        "sha": github_sha,
                         "repository": (
                             f"{repository.owner}/"
                             f"{repository.name}"
                         ),
-                        "branch": repository.default_branch,
+                        "branch": (
+                            repository.default_branch
+                        ),
                     },
                 )
 
                 db.add(chunk)
                 chunks_created += 1
+
+        # 6. Recursively ingest requested paths.
+        for path in paths:
+            await ingest_path(path)
 
         await db.commit()
 
@@ -237,7 +273,8 @@ class IngestionService:
             "status": "completed",
             "project_id": str(project.id),
             "repository": (
-                f"{repository.owner}/{repository.name}"
+                f"{repository.owner}/"
+                f"{repository.name}"
             ),
             "documents_created": documents_created,
             "chunks_created": chunks_created,
