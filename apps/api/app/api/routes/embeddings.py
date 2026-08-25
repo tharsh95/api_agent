@@ -5,14 +5,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models.document_chunk import DocumentChunk
-from app.models.project import Project
-from app.models.repository import Repository
-from app.services.embedding_service import EmbeddingService
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.models.knowledge_source import KnowledgeSource
 from app.models.project import Project
+from app.services.embedding_service import EmbeddingService
 
 router = APIRouter(
     prefix="/projects",

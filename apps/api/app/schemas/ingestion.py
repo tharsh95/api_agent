@@ -3,6 +3,6 @@ from pydantic import BaseModel, Field
 
 class IngestFilesRequest(BaseModel):
     paths: list[str] = Field(
-        min_length=1,
+        default_factory=list,
         max_length=50,
     )
