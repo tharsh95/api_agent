@@ -1,18 +1,20 @@
 import uuid
-from fastapi import BackgroundTasks
-from fastapi import APIRouter, Depends, HTTPException, Request
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.ingestion import IngestFilesRequest
 from app.services.ingestion_service import IngestionService
 from sqlalchemy import select
-
+from app.services.redis_queue_service import (
+    RedisQueueService,
+)
 from app.models.ingestion_job import IngestionJob
 from app.models.project import Project
 from app.services.ingestion_job_service import (
     IngestionJobService,
 )
-
+redis_queue_service = RedisQueueService()
 ingestion_job_service = IngestionJobService()
 router = APIRouter(
     prefix="/projects",
@@ -108,12 +110,11 @@ async def create_ingestion_job(
         project_id=project_id,
     )
 
-    background_tasks.add_task(
-        ingestion_job_service.run_job,
-        job.id,
-        project_id,
-        authenticated_user_id,
-    )
+    await redis_queue_service.enqueue(
+    job_id=str(job.id),
+    project_id=str(project_id),
+    user_id=str(authenticated_user_id),
+)
 
     return {
         "job_id": str(job.id),
