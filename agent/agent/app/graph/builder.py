@@ -78,9 +78,5 @@ def build_graph():
     },
 )
 
-    builder.add_edge(
-        "confirm_plan",
-        END,
-    )
 
     return builder.compile()
