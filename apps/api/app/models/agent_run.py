@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
@@ -25,6 +26,11 @@ class AgentRun(Base):
     user_request: Mapped[str] = mapped_column(
         Text,
         nullable=False,
+    )
+
+    integration_plan: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
     )
 
     status: Mapped[str] = mapped_column(

@@ -93,5 +93,6 @@ def create_plan(
         **state,
         "integration_plan": plan,
         "confirmation_required": True,
+        "confirmed": state.get("confirmed", False),
         "status": "plan_created",
-    }
+}

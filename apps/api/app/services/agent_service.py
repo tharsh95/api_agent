@@ -3,8 +3,10 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from agent.app.graph.builder import build_graph
-
+from agent.app.graph.builder import (
+    build_graph,
+    build_execution_graph,
+)
 from app.models.agent_run import AgentRun
 from app.models.project import Project
 from app.services.repository_context_service import (
@@ -17,6 +19,7 @@ class AgentService:
         self,
         repository_context_service=None,
         graph_instance=None,
+        execution_graph_instance=None,
     ):
         self.repository_context_service = (
             repository_context_service
@@ -26,6 +29,11 @@ class AgentService:
         self.graph = (
             graph_instance
             or build_graph()
+        )
+
+        self.execution_graph = (
+            execution_graph_instance
+            or build_execution_graph()
         )
 
     async def run(
@@ -75,6 +83,9 @@ class AgentService:
 
             if result["status"] == "awaiting_confirmation":
                 agent_run.status = "AWAITING_CONFIRMATION"
+                agent_run.integration_plan = result.get(
+                    "integration_plan"
+                )
                 agent_run.completed_at = None
             else:
                 agent_run.status = "COMPLETED"
@@ -131,20 +142,21 @@ class AgentService:
         project_id,
         user_id,
         agent_run_id,
-    ) -> dict:
-        result = await db.execute(
-            select(AgentRun).join(
-                Project,
-                AgentRun.project_id == Project.id,
-            ).where(
+    ):
+        query = (
+            select(AgentRun)
+            .join(Project, AgentRun.project_id == Project.id)
+            .where(
                 AgentRun.id == agent_run_id,
                 AgentRun.project_id == project_id,
                 Project.user_id == user_id,
             )
         )
+
+        result = await db.execute(query)
         agent_run = result.scalar_one_or_none()
 
-        if not agent_run:
+        if agent_run is None:
             raise HTTPException(
                 status_code=404,
                 detail="Agent run not found",
@@ -156,11 +168,42 @@ class AgentService:
                 detail="Agent run is not awaiting confirmation",
             )
 
-        agent_run.status = "CONFIRMED"
+        if not agent_run.integration_plan:
+            raise HTTPException(
+                status_code=400,
+                detail="Integration plan not found",
+            )
+
+        initial_state = {
+            "project_id": str(project_id),
+            "user_request": agent_run.user_request,
+            "repository": {},
+            "repository_profile": {},
+            "integration_candidates": [],
+            "integration_plan": agent_run.integration_plan,
+            "confirmation_required": True,
+            "confirmed": True,
+            "code_changes": [],
+            "status": "confirmed",
+            "error": None,
+        }
+
+        result = await self.execution_graph.ainvoke(initial_state)
+
+        if result["status"] == "changes_generated":
+            agent_run.status = "COMPLETED"
+        else:
+            agent_run.status = result["status"].upper()
+
         await db.commit()
 
         return {
             "agent_run_id": str(agent_run.id),
-            "status": agent_run.status,
-            "confirmed": True,
+            "status": result["status"],
+            "confirmed": result.get("confirmed", True),
+            "code_changes": result.get("code_changes", []),
+            "integration_plan": result.get(
+                "integration_plan",
+                agent_run.integration_plan,
+            ),
         }

@@ -203,10 +203,25 @@ async def test_agent_service_confirms_agent_run():
     user_id = uuid.uuid4()
     agent_run_id = uuid.uuid4()
 
+    integration_plan = {
+        "request": "Integrate Stripe payments",
+        "files_to_modify": ["package.json"],
+        "dependencies": ["stripe"],
+        "steps": [
+            {
+                "type": "dependency",
+                "dependency": "stripe",
+            }
+        ],
+        "requires_confirmation": True,
+    }
+
     agent_run = MagicMock()
     agent_run.id = agent_run_id
     agent_run.project_id = project_id
+    agent_run.user_request = "Integrate Stripe payments"
     agent_run.status = "AWAITING_CONFIRMATION"
+    agent_run.integration_plan = integration_plan
 
     query_result = MagicMock()
     query_result.scalar_one_or_none.return_value = agent_run
@@ -217,9 +232,32 @@ async def test_agent_service_confirms_agent_run():
     )
     db.commit = AsyncMock()
 
+    execution_graph = MagicMock()
+    execution_graph.ainvoke = AsyncMock(
+        return_value={
+            "status": "changes_generated",
+            "confirmed": True,
+            "code_changes": [
+                {
+                    "type": "dependency",
+                    "dependency": "stripe",
+                    "action": "add",
+                }
+            ],
+            "integration_plan": integration_plan,
+        }
+    )
+
+    repository_context_service = MagicMock()
+    repository_context_service.get_repository_context = (
+        AsyncMock()
+    )
+
     service = AgentService(
-        repository_context_service=MagicMock(),
-        graph_instance=MagicMock(),
+        repository_context_service=(
+            repository_context_service
+        ),
+        execution_graph_instance=execution_graph,
     )
 
     result = await service.confirm(
@@ -229,17 +267,41 @@ async def test_agent_service_confirms_agent_run():
         agent_run_id=agent_run_id,
     )
 
-    assert result == {
-        "agent_run_id": str(agent_run_id),
-        "status": "CONFIRMED",
-        "confirmed": True,
-    }
+    assert result["agent_run_id"] == str(agent_run_id)
+    assert result["status"] == "changes_generated"
+    assert result["confirmed"] is True
 
-    assert agent_run.status == "CONFIRMED"
+    assert result["code_changes"] == [
+        {
+            "type": "dependency",
+            "dependency": "stripe",
+            "action": "add",
+        }
+    ]
+
+    assert result["integration_plan"] == integration_plan
+
+    assert agent_run.status == "COMPLETED"
 
     db.execute.assert_awaited_once()
     db.commit.assert_awaited_once()
 
+    execution_graph.ainvoke.assert_awaited_once()
+
+    called_state = (
+        execution_graph.ainvoke.await_args.args[0]
+    )
+
+    assert called_state["integration_plan"] == (
+        integration_plan
+    )
+
+    assert called_state["confirmed"] is True
+    assert called_state["status"] == "confirmed"
+
+    repository_context_service \
+        .get_repository_context \
+        .assert_not_awaited()
 @pytest.mark.asyncio
 async def test_agent_service_rejects_confirmation_for_completed_run():
 
@@ -250,7 +312,7 @@ async def test_agent_service_rejects_confirmation_for_completed_run():
     agent_run = MagicMock()
     agent_run.id = agent_run_id
     agent_run.project_id = project_id
-    agent_run.status = "COMPLETED"
+    agent_run.status = "completed"
 
     query_result = MagicMock()
     query_result.scalar_one_or_none.return_value = agent_run
@@ -279,11 +341,29 @@ async def test_agent_service_rejects_confirmation_for_completed_run():
     )
 
 @pytest.mark.asyncio
-async def test_agent_service_confirmation_resumes_graph():
+async def test_agent_service_confirmation_executes_saved_plan():
 
     project_id = uuid.uuid4()
     user_id = uuid.uuid4()
     agent_run_id = uuid.uuid4()
+
+    integration_plan = {
+        "request": "Integrate Stripe payments",
+        "files_to_modify": ["package.json"],
+        "dependencies": ["stripe"],
+        "steps": [
+            {
+                "type": "dependency",
+                "dependency": "stripe",
+            },
+            {
+                "type": "modify_file",
+                "file": "package.json",
+                "purpose": "Update this file for the requested integration",
+            },
+        ],
+        "requires_confirmation": True,
+    }
 
     agent_run = MagicMock()
     agent_run.id = agent_run_id
@@ -292,6 +372,7 @@ async def test_agent_service_confirmation_resumes_graph():
         "Integrate Stripe payments"
     )
     agent_run.status = "AWAITING_CONFIRMATION"
+    agent_run.integration_plan = integration_plan
 
     query_result = MagicMock()
     query_result.scalar_one_or_none.return_value = (
@@ -304,17 +385,40 @@ async def test_agent_service_confirmation_resumes_graph():
     )
     db.commit = AsyncMock()
 
-    graph = MagicMock()
-    graph.ainvoke = AsyncMock(
+    execution_graph = MagicMock()
+    execution_graph.ainvoke = AsyncMock(
         return_value={
-            "status": "completed",
+            "status": "changes_generated",
             "confirmed": True,
+            "code_changes": [
+                {
+                    "type": "dependency",
+                    "dependency": "stripe",
+                    "action": "add",
+                },
+                {
+                    "type": "file",
+                    "file": "package.json",
+                    "action": "modify",
+                    "purpose": (
+                        "Update this file for the requested integration"
+                    ),
+                },
+            ],
+            "integration_plan": integration_plan,
         }
     )
 
+    repository_context_service = MagicMock()
+    repository_context_service.get_repository_context = (
+        AsyncMock()
+    )
+
     service = AgentService(
-        repository_context_service=MagicMock(),
-        graph_instance=graph,
+        repository_context_service=(
+            repository_context_service
+        ),
+        execution_graph_instance=execution_graph,
     )
 
     result = await service.confirm(
@@ -324,5 +428,45 @@ async def test_agent_service_confirmation_resumes_graph():
         agent_run_id=agent_run_id,
     )
 
-    assert result["status"] == "CONFIRMED"
+    assert result["status"] == "changes_generated"
     assert result["confirmed"] is True
+
+    assert result["code_changes"] == [
+        {
+            "type": "dependency",
+            "dependency": "stripe",
+            "action": "add",
+        },
+        {
+            "type": "file",
+            "file": "package.json",
+            "action": "modify",
+            "purpose": (
+                "Update this file for the requested integration"
+            ),
+        },
+    ]
+
+    assert agent_run.status == "COMPLETED"
+
+    execution_graph.ainvoke.assert_awaited_once()
+
+    called_state = (
+        execution_graph.ainvoke.await_args.args[0]
+    )
+
+    assert called_state["integration_plan"] == (
+        integration_plan
+    )
+
+    assert called_state["confirmed"] is True
+
+    assert called_state["repository"] == {}
+
+    assert called_state["repository_profile"] == {}
+
+    assert called_state["integration_candidates"] == []
+
+    repository_context_service \
+        .get_repository_context \
+        .assert_not_awaited()
