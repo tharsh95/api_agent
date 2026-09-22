@@ -15,11 +15,7 @@ from agent.app.graph.nodes.confirm import (
     confirm_plan,
 )
 from agent.app.graph.nodes.execution import execute_plan
-def route_after_confirmation(state: AgentState):
-    if state.get("confirmed", False):
-        return "execute"
 
-    return "end"
 
 def build_graph():
     builder = StateGraph(AgentState)
@@ -44,11 +40,6 @@ def build_graph():
         confirm_plan,
     )
 
-    builder.add_node(
-    "execution",
-    execute_plan,
-)
-
     builder.add_edge(
         START,
         "analyze_repository",
@@ -69,17 +60,29 @@ def build_graph():
         "confirm_plan",
     )
 
-    builder.add_conditional_edges(
-    "confirm_plan",
-    route_after_confirmation,
-    {
-        "execute": "execution",
-        "end": END,
-    },
-)
-
     builder.add_edge(
         "confirm_plan",
+        END,
+    )
+
+    return builder.compile()
+
+
+def build_execution_graph():
+    builder = StateGraph(AgentState)
+
+    builder.add_node(
+        "execution",
+        execute_plan,
+    )
+
+    builder.add_edge(
+        START,
+        "execution",
+    )
+
+    builder.add_edge(
+        "execution",
         END,
     )
 

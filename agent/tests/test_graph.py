@@ -403,11 +403,9 @@ def test_confirmed_plan_returns_confirmed():
         },
     )
 
-    assert result["status"] == "changes_generated"
+    assert result["status"] == "confirmed"
     assert result["confirmed"] is True
-    assert result["code_changes"]
-
-
+    assert result["code_changes"] == []
 def test_stripe_plan_has_structured_steps():
 
     graph = build_graph()
