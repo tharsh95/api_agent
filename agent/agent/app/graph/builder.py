@@ -1,19 +1,10 @@
 from langgraph.graph import START, END, StateGraph
 
 from agent.app.graph.state import AgentState
-
-from agent.app.graph.nodes.analyze_repository import (
-    analyze_repository,
-)
-from agent.app.graph.nodes.find_integration import (
-    find_integration,
-)
-from agent.app.graph.nodes.create_plan import (
-    create_plan,
-)
-from agent.app.graph.nodes.confirm import (
-    confirm_plan,
-)
+from agent.app.graph.nodes.analyze_repository import analyze_repository
+from agent.app.graph.nodes.find_integration import find_integration
+from agent.app.graph.nodes.create_plan import create_plan
+from agent.app.graph.nodes.confirm import confirm_plan
 from agent.app.graph.nodes.execution import execute_plan
 
 
@@ -68,12 +59,18 @@ def build_graph():
     return builder.compile()
 
 
-def build_execution_graph():
+def build_execution_graph(code_change_generator=None):
     builder = StateGraph(AgentState)
+
+    def execution_node(state):
+        return execute_plan(
+            state,
+            code_change_generator=code_change_generator,
+        )
 
     builder.add_node(
         "execution",
-        execute_plan,
+        execution_node,
     )
 
     builder.add_edge(

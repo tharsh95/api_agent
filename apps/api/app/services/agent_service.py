@@ -174,10 +174,19 @@ class AgentService:
                 detail="Integration plan not found",
             )
 
+        repository = (
+            await self.repository_context_service
+            .get_repository_context(
+                db=db,
+                project_id=project_id,
+                user_id=user_id,
+            )
+        )
+
         initial_state = {
             "project_id": str(project_id),
             "user_request": agent_run.user_request,
-            "repository": {},
+            "repository": repository,
             "repository_profile": {},
             "integration_candidates": [],
             "integration_plan": agent_run.integration_plan,

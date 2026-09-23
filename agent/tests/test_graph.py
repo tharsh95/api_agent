@@ -483,3 +483,69 @@ def test_stripe_plan_has_structured_steps():
         step["type"] == "test"
         for step in plan["steps"]
     )
+
+def test_execution_graph_generates_code_changes():
+    from agent.app.graph.builder import build_execution_graph
+
+    class FakeCodeChangeGenerator:
+        def generate(self, repository, integration_plan):
+            return [
+                {
+                    "file_path": "src/payment.py",
+                    "action": "modify",
+                    "original_content": "def pay():\\n    pass\\n",
+                    "new_content": (
+                        "import stripe\\n\\n"
+                        "def pay():\\n"
+                        "    return stripe.PaymentIntent.create()\\n"
+                    ),
+                    "diff": (
+                        "--- a/src/payment.py\\n"
+                        "+++ b/src/payment.py\\n"
+                    ),
+                }
+            ]
+
+    graph = build_execution_graph(
+        code_change_generator=FakeCodeChangeGenerator()
+    )
+
+    result = graph.invoke(
+        {
+            "project_id": "test-project",
+            "user_request": "Integrate Stripe payments",
+            "repository": {
+                "files": [
+                    {
+                        "path": "src/payment.py",
+                        "content": "def pay():\\n    pass\\n",
+                    }
+                ],
+            },
+            "repository_profile": {},
+            "integration_candidates": [],
+            "integration_plan": {
+                "steps": [
+                    {
+                        "type": "modify_file",
+                        "file": "src/payment.py",
+                        "purpose": "Update payment integration",
+                    }
+                ],
+                "requires_confirmation": True,
+            },
+            "confirmation_required": True,
+            "confirmed": True,
+            "code_changes": [],
+            "status": "confirmed",
+            "error": None,
+        },
+    )
+
+    assert result["status"] == "changes_generated"
+    assert len(result["code_changes"]) == 1
+
+    change = result["code_changes"][0]
+
+    assert change["file_path"] == "src/payment.py"
+    assert change["action"] == "modify"

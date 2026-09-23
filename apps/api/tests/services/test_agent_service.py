@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock
 import uuid
+
 import pytest
 from fastapi import HTTPException
 
@@ -83,7 +84,6 @@ async def test_agent_service_passes_repository_context():
         user_request="Integrate Stripe payments",
     )
 
-    # Repository context was fetched correctly.
     repository_context_service \
         .get_repository_context \
         .assert_awaited_once_with(
@@ -92,7 +92,6 @@ async def test_agent_service_passes_repository_context():
             user_id="user-123",
         )
 
-    # Graph was invoked.
     graph.ainvoke.assert_awaited_once()
 
     state = graph.ainvoke.call_args.args[0]
@@ -105,7 +104,6 @@ async def test_agent_service_passes_repository_context():
 
     assert state["repository"] == repository
 
-    # API response returned by AgentService.
     assert result["project_id"] == "project-123"
 
     assert result["status"] == "plan_created"
@@ -131,6 +129,7 @@ async def test_agent_service_passes_repository_context():
     ] == ["package.json"]
 
     assert result["requires_confirmation"] is True
+
 
 @pytest.mark.asyncio
 async def test_agent_service_saves_awaiting_confirmation_status():
@@ -191,10 +190,11 @@ async def test_agent_service_saves_awaiting_confirmation_status():
     agent_run = db.add.call_args.args[0]
 
     assert agent_run.status == "AWAITING_CONFIRMATION"
-    assert agent_run.completed_at is  None
+    assert agent_run.completed_at is None
 
     db.flush.assert_awaited_once()
     db.commit.assert_awaited_once()
+
 
 @pytest.mark.asyncio
 async def test_agent_service_confirms_agent_run():
@@ -249,8 +249,23 @@ async def test_agent_service_confirms_agent_run():
     )
 
     repository_context_service = MagicMock()
+
+    repository = {
+        "owner": "test-owner",
+        "name": "test-repo",
+        "default_branch": "main",
+        "files": [
+            {
+                "path": "package.json",
+                "content": '{"dependencies": {}}',
+            }
+        ],
+    }
+
     repository_context_service.get_repository_context = (
-        AsyncMock()
+        AsyncMock(
+            return_value=repository
+        )
     )
 
     service = AgentService(
@@ -286,6 +301,14 @@ async def test_agent_service_confirms_agent_run():
     db.execute.assert_awaited_once()
     db.commit.assert_awaited_once()
 
+    repository_context_service \
+        .get_repository_context \
+        .assert_awaited_once_with(
+            db=db,
+            project_id=project_id,
+            user_id=user_id,
+        )
+
     execution_graph.ainvoke.assert_awaited_once()
 
     called_state = (
@@ -298,10 +321,9 @@ async def test_agent_service_confirms_agent_run():
 
     assert called_state["confirmed"] is True
     assert called_state["status"] == "confirmed"
+    assert called_state["repository"] == repository
 
-    repository_context_service \
-        .get_repository_context \
-        .assert_not_awaited()
+
 @pytest.mark.asyncio
 async def test_agent_service_rejects_confirmation_for_completed_run():
 
@@ -340,6 +362,7 @@ async def test_agent_service_rejects_confirmation_for_completed_run():
         "Agent run is not awaiting confirmation"
     )
 
+
 @pytest.mark.asyncio
 async def test_agent_service_confirmation_executes_saved_plan():
 
@@ -359,7 +382,9 @@ async def test_agent_service_confirmation_executes_saved_plan():
             {
                 "type": "modify_file",
                 "file": "package.json",
-                "purpose": "Update this file for the requested integration",
+                "purpose": (
+                    "Update this file for the requested integration"
+                ),
             },
         ],
         "requires_confirmation": True,
@@ -410,8 +435,23 @@ async def test_agent_service_confirmation_executes_saved_plan():
     )
 
     repository_context_service = MagicMock()
+
+    repository = {
+        "owner": "test-owner",
+        "name": "test-repo",
+        "default_branch": "main",
+        "files": [
+            {
+                "path": "package.json",
+                "content": '{"dependencies": {}}',
+            }
+        ],
+    }
+
     repository_context_service.get_repository_context = (
-        AsyncMock()
+        AsyncMock(
+            return_value=repository
+        )
     )
 
     service = AgentService(
@@ -461,7 +501,7 @@ async def test_agent_service_confirmation_executes_saved_plan():
 
     assert called_state["confirmed"] is True
 
-    assert called_state["repository"] == {}
+    assert called_state["repository"] == repository
 
     assert called_state["repository_profile"] == {}
 
@@ -469,4 +509,8 @@ async def test_agent_service_confirmation_executes_saved_plan():
 
     repository_context_service \
         .get_repository_context \
-        .assert_not_awaited()
+        .assert_awaited_once_with(
+            db=db,
+            project_id=project_id,
+            user_id=user_id,
+        )
