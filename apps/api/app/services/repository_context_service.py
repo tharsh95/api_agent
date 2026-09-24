@@ -163,6 +163,7 @@ class RepositoryContextService:
             "name": repository.name,
             "default_branch": repository.default_branch,
             "url": repository.url,
+            "installation_id": installation.installation_id,
             "files": files,
         }
 

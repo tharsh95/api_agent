@@ -268,11 +268,30 @@ async def test_agent_service_confirms_agent_run():
         )
     )
 
+    agent_execution_service = MagicMock()
+    agent_execution_service.execute = AsyncMock(
+        return_value={
+            "execution": {
+                "branch_name": "agent/test",
+                "changes_applied": 1,
+                "commits": [],
+            },
+            "pull_request": {
+                "id": str(uuid.uuid4()),
+                "github_pr_id": "42",
+                "branch_name": "agent/test",
+                "pr_url": "https://github.com/test-owner/test-repo/pull/42",
+                "status": "OPEN",
+            },
+        }
+    )
+
     service = AgentService(
         repository_context_service=(
             repository_context_service
         ),
         execution_graph_instance=execution_graph,
+        agent_execution_service=agent_execution_service,
     )
 
     result = await service.confirm(
@@ -454,11 +473,30 @@ async def test_agent_service_confirmation_executes_saved_plan():
         )
     )
 
+    agent_execution_service = MagicMock()
+    agent_execution_service.execute = AsyncMock(
+        return_value={
+            "execution": {
+                "branch_name": "agent/test",
+                "changes_applied": 1,
+                "commits": [],
+            },
+            "pull_request": {
+                "id": str(uuid.uuid4()),
+                "github_pr_id": "42",
+                "branch_name": "agent/test",
+                "pr_url": "https://github.com/test-owner/test-repo/pull/42",
+                "status": "OPEN",
+            },
+        }
+    )
+
     service = AgentService(
         repository_context_service=(
             repository_context_service
         ),
         execution_graph_instance=execution_graph,
+        agent_execution_service=agent_execution_service,
     )
 
     result = await service.confirm(
@@ -514,3 +552,316 @@ async def test_agent_service_confirmation_executes_saved_plan():
             project_id=project_id,
             user_id=user_id,
         )
+
+@pytest.mark.asyncio
+async def test_agent_service_confirmation_creates_pull_request():
+    project_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    agent_run_id = uuid.uuid4()
+
+    integration_plan = {
+        "request": "Integrate Stripe payments",
+        "files_to_modify": ["src/payment.py"],
+        "dependencies": ["stripe"],
+        "steps": [
+            {
+                "type": "modify_file",
+                "file": "src/payment.py",
+                "purpose": "Integrate Stripe payments",
+            }
+        ],
+        "requires_confirmation": True,
+    }
+
+    agent_run = MagicMock()
+    agent_run.id = agent_run_id
+    agent_run.project_id = project_id
+    agent_run.user_request = "Integrate Stripe payments"
+    agent_run.status = "AWAITING_CONFIRMATION"
+    agent_run.integration_plan = integration_plan
+
+    query_result = MagicMock()
+    query_result.scalar_one_or_none.return_value = agent_run
+
+    db = MagicMock()
+    db.execute = AsyncMock(
+        return_value=query_result
+    )
+    db.commit = AsyncMock()
+
+    repository = {
+        "owner": "acme",
+        "name": "payments-api",
+        "default_branch": "main",
+        "installation_id": 123,
+        "files": [
+            {
+                "path": "src/payment.py",
+                "content": (
+                    "def pay():\n"
+                    "    pass\n"
+                ),
+            }
+        ],
+    }
+
+    repository_context_service = MagicMock()
+    repository_context_service.get_repository_context = (
+        AsyncMock(
+            return_value=repository
+        )
+    )
+
+    code_changes = [
+        {
+            "file_path": "src/payment.py",
+            "action": "modify",
+            "original_content": (
+                "def pay():\n"
+                "    pass\n"
+            ),
+            "new_content": (
+                "import stripe\n\n"
+                "def pay():\n"
+                "    return True\n"
+            ),
+            "diff": "test-diff",
+        }
+    ]
+
+    execution_graph = MagicMock()
+    execution_graph.ainvoke = AsyncMock(
+        return_value={
+            "status": "changes_generated",
+            "confirmed": True,
+            "code_changes": code_changes,
+            "integration_plan": integration_plan,
+        }
+    )
+
+    agent_execution_service = MagicMock()
+    agent_execution_service.execute = AsyncMock(
+        return_value={
+            "execution": {
+                "branch_name": f"agent/{agent_run_id}",
+                "changes_applied": 1,
+                "commits": [
+                    {
+                        "file_path": "src/payment.py",
+                        "commit_sha": "commit-123",
+                    }
+                ],
+            },
+            "pull_request": {
+                "id": str(uuid.uuid4()),
+                "github_pr_id": "42",
+                "branch_name": f"agent/{agent_run_id}",
+                "pr_url": (
+                    "https://github.com/"
+                    "acme/payments-api/pull/42"
+                ),
+                "status": "OPEN",
+            },
+        }
+    )
+
+    service = AgentService(
+        repository_context_service=(
+            repository_context_service
+        ),
+        execution_graph_instance=execution_graph,
+        agent_execution_service=(
+            agent_execution_service
+        ),
+    )
+
+    result = await service.confirm(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        agent_run_id=agent_run_id,
+    )
+
+    agent_execution_service.execute.assert_awaited_once_with(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        agent_run_id=agent_run_id,
+        user_request="Integrate Stripe payments",
+        code_changes=code_changes,
+    )
+
+    assert agent_run.status == "COMPLETED"
+    assert agent_run.completed_at is not None
+
+    assert result["pull_request"][
+        "github_pr_id"
+    ] == "42"
+
+    assert result["pull_request"]["pr_url"] == (
+        "https://github.com/"
+        "acme/payments-api/pull/42"
+    )
+
+    assert result["execution"][
+        "execution"
+    ]["changes_applied"] == 1
+
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_agent_service_confirmation_creates_pull_request():
+    project_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    agent_run_id = uuid.uuid4()
+
+    integration_plan = {
+        "request": "Integrate Stripe payments",
+        "files_to_modify": ["src/payment.py"],
+        "dependencies": ["stripe"],
+        "steps": [
+            {
+                "type": "modify_file",
+                "file": "src/payment.py",
+                "purpose": "Integrate Stripe payments",
+            }
+        ],
+        "requires_confirmation": True,
+    }
+
+    agent_run = MagicMock()
+    agent_run.id = agent_run_id
+    agent_run.project_id = project_id
+    agent_run.user_request = "Integrate Stripe payments"
+    agent_run.status = "AWAITING_CONFIRMATION"
+    agent_run.integration_plan = integration_plan
+
+    query_result = MagicMock()
+    query_result.scalar_one_or_none.return_value = agent_run
+
+    db = MagicMock()
+    db.execute = AsyncMock(
+        return_value=query_result
+    )
+    db.commit = AsyncMock()
+
+    repository = {
+        "owner": "acme",
+        "name": "payments-api",
+        "default_branch": "main",
+        "installation_id": 123,
+        "files": [
+            {
+                "path": "src/payment.py",
+                "content": (
+                    "def pay():\n"
+                    "    pass\n"
+                ),
+            }
+        ],
+    }
+
+    repository_context_service = MagicMock()
+    repository_context_service.get_repository_context = (
+        AsyncMock(
+            return_value=repository
+        )
+    )
+
+    code_changes = [
+        {
+            "file_path": "src/payment.py",
+            "action": "modify",
+            "original_content": (
+                "def pay():\n"
+                "    pass\n"
+            ),
+            "new_content": (
+                "import stripe\n\n"
+                "def pay():\n"
+                "    return True\n"
+            ),
+            "diff": "test-diff",
+        }
+    ]
+
+    execution_graph = MagicMock()
+    execution_graph.ainvoke = AsyncMock(
+        return_value={
+            "status": "changes_generated",
+            "confirmed": True,
+            "code_changes": code_changes,
+            "integration_plan": integration_plan,
+        }
+    )
+
+    agent_execution_service = MagicMock()
+    agent_execution_service.execute = AsyncMock(
+        return_value={
+            "execution": {
+                "branch_name": f"agent/{agent_run_id}",
+                "changes_applied": 1,
+                "commits": [
+                    {
+                        "file_path": "src/payment.py",
+                        "commit_sha": "commit-123",
+                    }
+                ],
+            },
+            "pull_request": {
+                "id": str(uuid.uuid4()),
+                "github_pr_id": "42",
+                "branch_name": f"agent/{agent_run_id}",
+                "pr_url": (
+                    "https://github.com/"
+                    "acme/payments-api/pull/42"
+                ),
+                "status": "OPEN",
+            },
+        }
+    )
+
+    service = AgentService(
+        repository_context_service=(
+            repository_context_service
+        ),
+        execution_graph_instance=execution_graph,
+        agent_execution_service=(
+            agent_execution_service
+        ),
+    )
+
+    result = await service.confirm(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        agent_run_id=agent_run_id,
+    )
+
+    agent_execution_service.execute.assert_awaited_once_with(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
+        agent_run_id=agent_run_id,
+        user_request="Integrate Stripe payments",
+        code_changes=code_changes,
+    )
+
+    assert agent_run.status == "COMPLETED"
+    assert agent_run.completed_at is not None
+
+    assert result["pull_request"][
+        "github_pr_id"
+    ] == "42"
+
+    assert result["pull_request"]["pr_url"] == (
+        "https://github.com/"
+        "acme/payments-api/pull/42"
+    )
+
+    assert result["execution"][
+        "execution"
+    ]["changes_applied"] == 1
+
+    db.commit.assert_awaited_once()

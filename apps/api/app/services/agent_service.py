@@ -9,6 +9,7 @@ from agent.app.graph.builder import (
 )
 from app.models.agent_run import AgentRun
 from app.models.project import Project
+from app.services.agent_execution_service import AgentExecutionService
 from app.services.repository_context_service import (
     RepositoryContextService,
 )
@@ -20,6 +21,7 @@ class AgentService:
         repository_context_service=None,
         graph_instance=None,
         execution_graph_instance=None,
+        agent_execution_service=None,
     ):
         self.repository_context_service = (
             repository_context_service
@@ -34,6 +36,11 @@ class AgentService:
         self.execution_graph = (
             execution_graph_instance
             or build_execution_graph()
+        )
+
+        self.agent_execution_service = (
+            agent_execution_service
+            or AgentExecutionService()
         )
 
     async def run(
@@ -199,7 +206,20 @@ class AgentService:
 
         result = await self.execution_graph.ainvoke(initial_state)
 
+        execution = None
+
         if result["status"] == "changes_generated":
+            code_changes = result.get("code_changes", [])
+
+            execution = await self.agent_execution_service.execute(
+                db=db,
+                project_id=project_id,
+                user_id=user_id,
+                agent_run_id=agent_run.id,
+                user_request=agent_run.user_request,
+                code_changes=code_changes,
+            )
+
             agent_run.status = "COMPLETED"
         else:
             agent_run.status = result["status"].upper()
@@ -214,5 +234,11 @@ class AgentService:
             "integration_plan": result.get(
                 "integration_plan",
                 agent_run.integration_plan,
+            ),
+            "execution": execution,
+            "pull_request": (
+                execution.get("pull_request")
+                if execution
+                else None
             ),
         }

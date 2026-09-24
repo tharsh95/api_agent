@@ -162,6 +162,181 @@ class GitHubService:
             params=params,
         )
 
+    async def get_branch(
+        self,
+        installation_token: str,
+        owner: str,
+        repo: str,
+        branch: str,
+    ) -> dict:
+        """
+        Get a Git reference for a branch.
+        """
+
+        return await self._get_installation(
+            f"/repos/{owner}/{repo}/git/ref/heads/{branch}",
+            installation_token,
+        )
+
+    async def create_branch(
+        self,
+        installation_token: str,
+        owner: str,
+        repo: str,
+        branch_name: str,
+        source_branch: str,
+    ) -> dict:
+        """
+        Create a new branch from an existing source branch.
+        """
+
+        source_ref = await self.get_branch(
+            installation_token=installation_token,
+            owner=owner,
+            repo=repo,
+            branch=source_branch,
+        )
+
+        source_sha = source_ref["object"]["sha"]
+
+        return await self._post_installation(
+            f"/repos/{owner}/{repo}/git/refs",
+            installation_token,
+            json={
+                "ref": f"refs/heads/{branch_name}",
+                "sha": source_sha,
+            },
+        )
+
+    async def create_or_update_file(
+        self,
+        installation_token: str,
+        owner: str,
+        repo: str,
+        path: str,
+        content: str,
+        branch: str,
+        message: str,
+        sha: str | None = None,
+    ) -> dict:
+        """
+        Create or update a file on a repository branch.
+
+        If sha is provided, GitHub treats this as an update.
+        If sha is omitted, GitHub creates a new file.
+        """
+
+        import base64
+
+        payload = {
+            "message": message,
+            "content": base64.b64encode(
+                content.encode("utf-8")
+            ).decode("ascii"),
+            "branch": branch,
+        }
+
+        if sha:
+            payload["sha"] = sha
+
+        return await self._put_installation(
+            f"/repos/{owner}/{repo}/contents/{path}",
+            installation_token,
+            json=payload,
+        )
+
+    async def get_file(
+        self,
+        installation_token: str,
+        owner: str,
+        repo: str,
+        path: str,
+        branch: str,
+    ) -> dict:
+        """
+        Get a file from a specific repository branch.
+
+        GitHub returns the file SHA which is required when
+        updating an existing file.
+        """
+
+        return await self._get_installation(
+            f"/repos/{owner}/{repo}/contents/{path}",
+            installation_token,
+            params={"ref": branch},
+        )
+
+    async def create_pull_request(
+        self,
+        installation_token: str,
+        owner: str,
+        repo: str,
+        title: str,
+        body: str,
+        head: str,
+        base: str,
+    ) -> dict:
+        """
+        Create a pull request.
+        """
+
+        return await self._post_installation(
+            f"/repos/{owner}/{repo}/pulls",
+            installation_token,
+            json={
+                "title": title,
+                "body": body,
+                "head": head,
+                "base": base,
+            },
+        )
+
+    async def _post_installation(
+        self,
+        path: str,
+        installation_token: str,
+        json: dict,
+    ) -> dict:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{GITHUB_API_URL}{path}",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": (
+                        f"Bearer {installation_token}"
+                    ),
+                    "X-GitHub-Api-Version": GITHUB_API_VERSION,
+                },
+                json=json,
+            )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    async def _put_installation(
+        self,
+        path: str,
+        installation_token: str,
+        json: dict,
+    ) -> dict:
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{GITHUB_API_URL}{path}",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": (
+                        f"Bearer {installation_token}"
+                    ),
+                    "X-GitHub-Api-Version": GITHUB_API_VERSION,
+                },
+                json=json,
+            )
+
+        response.raise_for_status()
+
+        return response.json()
+
     async def _get(
         self,
         path: str,
