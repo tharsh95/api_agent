@@ -16,11 +16,10 @@ def create_plan(
     )
 
     request = state["user_request"]
-    request_lower = request.lower()
 
     dependencies = []
 
-    if "stripe" in request_lower:
+    if "stripe" in request.lower():
         if profile.get("language") in {
             "JavaScript",
             "TypeScript",
@@ -32,58 +31,56 @@ def create_plan(
         candidate["file"]
         for candidate in candidates
         if candidate.get("file")
-        and candidate.get("file") != "unknown"
+        and candidate["file"] != "unknown"
     ]
 
     steps = []
 
     for dependency in dependencies:
-        steps.append({
-            "type": "dependency",
-            "dependency": dependency,
-        })
+        steps.append(
+            {
+                "type": "dependency",
+                "dependency": dependency,
+            }
+        )
 
     for file in files_to_modify:
-        steps.append({
-            "type": "modify_file",
-            "file": file,
-            "purpose": (
-                "Update this file for the requested "
-                "integration"
-            ),
-        })
+        steps.append(
+            {
+                "type": "modify_file",
+                "file": file,
+                "purpose": (
+                    "Update this file for the "
+                    "requested integration"
+                ),
+            }
+        )
 
-    # Only add configuration when the request actually
-    # requires integration configuration.
-    if "stripe" in request_lower:
-        steps.append({
+    steps.append(
+        {
             "type": "configuration",
-            "purpose": "Add or update Stripe configuration",
-        })
-
-    if "health" in request_lower and profile.get("language") == "JavaScript":
-        steps.append({
-            "type": "create_file",
-            "file": "tests/health.test.js",
             "purpose": (
-                "Add a Jest and Supertest test for GET /api/health "
-                "that verifies the response status and JSON body"
+                "Add or update integration "
+                "configuration"
             ),
-        })
-    else:
-        steps.append({
+        }
+    )
+
+    steps.append(
+        {
             "type": "test",
-            "purpose": "Add tests for the requested change",
-        })
+            "purpose": "Add tests for the integration",
+        }
+    )
 
     plan = {
         "request": request,
         "integration": {
             "provider": "stripe"
-            if "stripe" in request_lower
+            if "stripe" in request.lower()
             else "unknown",
             "type": "payment"
-            if "stripe" in request_lower
+            if "stripe" in request.lower()
             else "unknown",
         },
         "files_to_modify": files_to_modify,
@@ -98,4 +95,4 @@ def create_plan(
         "confirmation_required": True,
         "confirmed": state.get("confirmed", False),
         "status": "plan_created",
-    }
+}

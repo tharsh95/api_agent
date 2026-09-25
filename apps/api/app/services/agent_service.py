@@ -13,8 +13,6 @@ from app.services.agent_execution_service import AgentExecutionService
 from app.services.repository_context_service import (
     RepositoryContextService,
 )
-from app.core.config import settings
-from agent.app.services.code_change_generator import CodeChangeGenerator
 
 class AgentService:
 
@@ -35,15 +33,9 @@ class AgentService:
             or build_graph()
         )
 
-        code_change_generator = CodeChangeGenerator(
-            api_key=settings.openai_api_key,
-        )
-
         self.execution_graph = (
             execution_graph_instance
-            or build_execution_graph(
-                code_change_generator=code_change_generator,
-            )
+            or build_execution_graph()
         )
 
         self.agent_execution_service = (
@@ -228,31 +220,15 @@ class AgentService:
                 code_changes=code_changes,
             )
 
-            validation = (
-                execution.get("validation", {})
-                if execution
-                else {}
-            )
-
-            if validation.get("status") == "passed":
-                agent_run.status = "COMPLETED"
-            else:
-                agent_run.status = "VALIDATION_FAILED"
-
-            agent_run.completed_at = datetime.now(
-                timezone.utc
-            )
+            agent_run.status = "COMPLETED"
         else:
             agent_run.status = result["status"].upper()
-            agent_run.completed_at = datetime.now(
-                timezone.utc
-            )
 
         await db.commit()
 
         return {
             "agent_run_id": str(agent_run.id),
-            "status": agent_run.status,
+            "status": result["status"],
             "confirmed": result.get("confirmed", True),
             "code_changes": result.get("code_changes", []),
             "integration_plan": result.get(
@@ -260,11 +236,6 @@ class AgentService:
                 agent_run.integration_plan,
             ),
             "execution": execution,
-            "validation": (
-                execution.get("validation")
-                if execution
-                else None
-            ),
             "pull_request": (
                 execution.get("pull_request")
                 if execution
