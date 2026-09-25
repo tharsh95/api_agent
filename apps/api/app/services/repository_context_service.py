@@ -114,7 +114,7 @@ class RepositoryContextService:
             )
 
         # 5. Fetch profile files
-        files = []
+        profile_files = []
 
         for path in self.PROFILE_PATHS:
             try:
@@ -151,12 +151,27 @@ class RepositoryContextService:
             if len(content) > self.MAX_FILE_SIZE:
                 continue
 
-            files.append(
+            profile_files.append(
                 {
                     "path": path,
                     "content": content,
                 }
             )
+
+        # 6. Fetch repository source files
+        repository_files = await self._fetch_repository_files(
+            installation_token=installation_token,
+            owner=repository.owner,
+            repo=repository.name,
+            ref=repository.default_branch,
+        )
+
+        # Keep profile files first and avoid duplicates
+        seen_paths = {file["path"] for file in profile_files}
+        files = profile_files + [
+            file for file in repository_files
+            if file["path"] not in seen_paths
+        ]
 
         return {
             "owner": repository.owner,
@@ -164,7 +179,7 @@ class RepositoryContextService:
             "default_branch": repository.default_branch,
             "url": repository.url,
             "installation_id": installation.installation_id,
-            "files": files,
+            "files": files[: self.MAX_FILES],
         }
 
     async def _fetch_repository_files(
@@ -257,5 +272,6 @@ class RepositoryContextService:
 
         # Start traversal from repository root
         await walk("")
+        return files
 
         return files
