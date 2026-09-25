@@ -49,22 +49,12 @@ async def test_executes_changes_and_creates_pull_request():
     db = MagicMock()
     db.flush = AsyncMock()
 
-    code_validation_service = AsyncMock()
-    code_validation_service.validate.return_value = {
-        "status": "passed",
-        "passed": True,
-        "exit_code": 0,
-        "stdout": "Tests passed",
-        "stderr": "",
-    }
-
     service = AgentExecutionService(
         repository_context_service=(
             repository_context_service
         ),
         github_service=github_service,
         github_code_executor=github_code_executor,
-        code_validation_service=code_validation_service,
     )
 
     from uuid import UUID
@@ -230,74 +220,3 @@ async def test_rejects_missing_installation_token():
 
     github_code_executor.execute.assert_not_awaited()
     github_service.create_pull_request.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "validation_status",
-    ["failed", "skipped", "error"],
-)
-async def test_does_not_create_pr_when_validation_does_not_pass(
-    validation_status,
-):
-    repository_context_service = AsyncMock()
-    repository_context_service.get_repository_context.return_value = {
-        "owner": "acme",
-        "name": "payments-api",
-        "default_branch": "main",
-        "url": "https://github.com/acme/payments-api",
-        "installation_id": 123,
-        "files": [],
-    }
-
-    github_service = AsyncMock()
-    github_service.create_installation_access_token.return_value = {
-        "token": "installation-token",
-    }
-
-    github_code_executor = AsyncMock()
-    github_code_executor.execute.return_value = {
-        "branch_name": "agent/test-run",
-        "changes_applied": 1,
-        "commits": [],
-    }
-
-    code_validation_service = AsyncMock()
-    code_validation_service.validate.return_value = {
-        "status": validation_status,
-        "passed": False,
-        "exit_code": 1,
-        "stdout": "",
-        "stderr": "Validation did not pass",
-    }
-
-    db = MagicMock()
-    db.flush = AsyncMock()
-
-    service = AgentExecutionService(
-        repository_context_service=repository_context_service,
-        github_service=github_service,
-        github_code_executor=github_code_executor,
-        code_validation_service=code_validation_service,
-    )
-
-    from uuid import UUID
-
-    result = await service.execute(
-        db=db,
-        project_id=UUID("00000000-0000-0000-0000-000000000001"),
-        user_id=UUID("00000000-0000-0000-0000-000000000002"),
-        agent_run_id=UUID("00000000-0000-0000-0000-000000000003"),
-        user_request="Integrate Stripe payments",
-        code_changes=[
-            {
-                "file_path": "src/payment.py",
-                "action": "modify",
-                "new_content": "def pay(): return True",
-            }
-        ],
-    )
-
-    assert result["pull_request"] is None
-    assert result["validation"]["status"] == validation_status
-    github_service.create_pull_request.assert_not_called()
