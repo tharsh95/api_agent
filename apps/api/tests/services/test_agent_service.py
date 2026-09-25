@@ -276,6 +276,13 @@ async def test_agent_service_confirms_agent_run():
                 "changes_applied": 1,
                 "commits": [],
             },
+            "validation": {
+                "status": "passed",
+                "passed": True,
+                "exit_code": 0,
+                "stdout": "Tests passed",
+                "stderr": "",
+            },
             "pull_request": {
                 "id": str(uuid.uuid4()),
                 "github_pr_id": "42",
@@ -302,7 +309,7 @@ async def test_agent_service_confirms_agent_run():
     )
 
     assert result["agent_run_id"] == str(agent_run_id)
-    assert result["status"] == "changes_generated"
+    assert result["status"] == "COMPLETED"
     assert result["confirmed"] is True
 
     assert result["code_changes"] == [
@@ -481,6 +488,13 @@ async def test_agent_service_confirmation_executes_saved_plan():
                 "changes_applied": 1,
                 "commits": [],
             },
+            "validation": {
+                "status": "passed",
+                "passed": True,
+                "exit_code": 0,
+                "stdout": "Tests passed",
+                "stderr": "",
+            },
             "pull_request": {
                 "id": str(uuid.uuid4()),
                 "github_pr_id": "42",
@@ -506,7 +520,7 @@ async def test_agent_service_confirmation_executes_saved_plan():
         agent_run_id=agent_run_id,
     )
 
-    assert result["status"] == "changes_generated"
+    assert result["status"] == "COMPLETED"
     assert result["confirmed"] is True
 
     assert result["code_changes"] == [
@@ -651,6 +665,13 @@ async def test_agent_service_confirmation_creates_pull_request():
                         "commit_sha": "commit-123",
                     }
                 ],
+            },
+            "validation": {
+                "status": "passed",
+                "passed": True,
+                "exit_code": 0,
+                "stdout": "Tests passed",
+                "stderr": "",
             },
             "pull_request": {
                 "id": str(uuid.uuid4()),
@@ -808,6 +829,13 @@ async def test_agent_service_confirmation_creates_pull_request():
                         "commit_sha": "commit-123",
                     }
                 ],
+            },
+            "validation": {
+                "status": "passed",
+                "passed": True,
+                "exit_code": 0,
+                "stdout": "Tests passed",
+                "stderr": "",
             },
             "pull_request": {
                 "id": str(uuid.uuid4()),

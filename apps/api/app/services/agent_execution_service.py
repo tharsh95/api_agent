@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.pull_request import PullRequest
 from app.services.github_code_executor import GitHubCodeExecutor
 from app.services.github_service import GitHubService
+from app.services.code_validation_service import CodeValidationService
 from app.services.repository_context_service import (
     RepositoryContextService,
 )
@@ -21,6 +22,7 @@ class AgentExecutionService:
         repository_context_service=None,
         github_service=None,
         github_code_executor=None,
+        code_validation_service=None,
     ):
         self.repository_context_service = (
             repository_context_service
@@ -37,6 +39,11 @@ class AgentExecutionService:
             or GitHubCodeExecutor(
                 github_service=self.github_service,
             )
+        )
+
+        self.code_validation_service = (
+            code_validation_service
+            or CodeValidationService()
         )
 
     async def execute(
@@ -89,6 +96,23 @@ class AgentExecutionService:
             )
         )
 
+        # Validate the generated branch before opening a PR.
+        validation_result = (
+            await self.code_validation_service.validate(
+                installation_token=installation_token,
+                owner=owner,
+                repo=repo,
+                branch=branch_name,
+            )
+        )
+
+        if validation_result.get("status") != "passed":
+            return {
+                "pull_request": None,
+                "execution": execution_result,
+                "validation": validation_result,
+            }
+
         pr_title = self._build_pr_title(
             user_request=user_request,
         )
@@ -132,6 +156,7 @@ class AgentExecutionService:
                 "status": pull_request.status,
             },
             "execution": execution_result,
+            "validation": validation_result,
         }
 
     async def _get_installation_token(
