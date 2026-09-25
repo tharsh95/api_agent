@@ -9,13 +9,15 @@ class CodeChangeGenerator:
         self,
         client=None,
         model: str = "gpt-4.1-mini",
+        api_key: str | None = None,
     ):
         self.client = client
         self.model = model
+        self.api_key = api_key
 
     def _get_client(self):
         if self.client is None:
-            self.client = OpenAI()
+            self.client = OpenAI(api_key=self.api_key)
 
         return self.client
 
@@ -33,15 +35,30 @@ class CodeChangeGenerator:
         changes = []
 
         for step in integration_plan.get("steps", []):
-            if step.get("type") != "modify_file":
+            step_type = step.get("type")
+
+            if step_type not in ("modify_file", "create_file"):
                 continue
 
             file_path = step.get("file")
 
-            if not file_path or file_path not in files:
+            if not file_path:
                 continue
 
-            original_content = files[file_path]
+            if step_type == "modify_file":
+                if file_path not in files:
+                    continue
+
+                original_content = files[file_path]
+                action = "modify"
+            else:
+                if file_path in files:
+                    raise ValueError(
+                        f"Cannot create {file_path}: file already exists"
+                    )
+
+                original_content = ""
+                action = "create"
 
             new_content = self._apply_change(
                 file_path=file_path,
@@ -66,7 +83,7 @@ class CodeChangeGenerator:
             changes.append(
                 {
                     "file_path": file_path,
-                    "action": "modify",
+                    "action": action,
                     "original_content": original_content,
                     "new_content": new_content,
                     "diff": diff,
@@ -148,21 +165,49 @@ class CodeChangeGenerator:
             "default_branch": repository.get("default_branch"),
         }
 
+        operation = step.get("type")
+
+        if operation == "create_file":
+            instruction = (
+                "Create this new file from scratch. "
+                "Return the complete new file content only."
+            )
+            content_label = "Initial file content (empty):"
+        else:
+            instruction = (
+                "Modify this existing file according to the approved "
+                "plan. Preserve unrelated functionality. "
+                "Return the complete updated file content only."
+            )
+            content_label = "Current file content:"
+
+        repository_files = [
+            {
+                "path": item.get("path"),
+                "content": item.get("content", "")[:3000],
+            }
+            for item in repository.get("files", [])
+            if item.get("path") and item.get("path") != file_path
+        ]
+
         return (
+            "You are a senior software engineer working on an existing "
+            "repository.\n\n"
             "Approved integration plan:\n"
             f"{json.dumps(integration_plan, indent=2)}\n\n"
-            "Current repository:\n"
+            "Repository metadata:\n"
             f"{json.dumps(repository_metadata, indent=2)}\n\n"
-            "File to modify:\n"
+            "Repository files for context:\n"
+            f"{json.dumps(repository_files, indent=2)}\n\n"
+            "Target file:\n"
             f"{file_path}\n\n"
-            "Approved modification step:\n"
+            "Approved operation:\n"
             f"{json.dumps(step, indent=2)}\n\n"
-            "Current file content:\n"
+            f"{content_label}\n"
             "```text\n"
             f"{original_content}\n"
             "```\n\n"
-            "Modify this file according to the approved plan. "
-            "Return the complete updated file content only."
+            f"{instruction}"
         )
 
     @staticmethod

@@ -27,17 +27,6 @@ class GitHubCodeExecutor:
         branch_name: str,
         code_changes: list[dict],
     ) -> dict:
-        """
-        Create a branch and apply generated code changes.
-
-        Returns:
-            {
-                "branch_name": str,
-                "changes_applied": int,
-                "commits": list[dict],
-            }
-        """
-
         if not code_changes:
             raise ValueError(
                 "Cannot execute code changes: no changes provided."
@@ -56,6 +45,7 @@ class GitHubCodeExecutor:
         for change in code_changes:
             file_path = change.get("file_path")
             new_content = change.get("new_content")
+            action = change.get("action", "modify")
 
             if not file_path:
                 raise ValueError(
@@ -68,46 +58,44 @@ class GitHubCodeExecutor:
                     "is missing new_content."
                 )
 
-            file_data = await self.github_service.get_file(
-                installation_token=installation_token,
-                owner=owner,
-                repo=repo,
-                path=file_path,
-                branch=branch_name,
-            )
-
-            file_sha = file_data.get("sha")
-
-            if not file_sha:
+            if action not in ("create", "modify"):
                 raise ValueError(
-                    f"GitHub did not return a SHA for {file_path}."
+                    f"Unsupported action '{action}' for {file_path}."
                 )
 
-            commit_message = self._build_commit_message(
-                change=change,
-            )
+            file_sha = None
 
-            result = (
-                await self.github_service.create_or_update_file(
+            if action == "modify":
+                file_data = await self.github_service.get_file(
                     installation_token=installation_token,
                     owner=owner,
                     repo=repo,
                     path=file_path,
-                    content=new_content,
                     branch=branch_name,
-                    message=commit_message,
-                    sha=file_sha,
                 )
+
+                file_sha = file_data.get("sha")
+
+                if not file_sha:
+                    raise ValueError(
+                        f"GitHub did not return a SHA for {file_path}."
+                    )
+
+            result = await self.github_service.create_or_update_file(
+                installation_token=installation_token,
+                owner=owner,
+                repo=repo,
+                path=file_path,
+                content=new_content,
+                branch=branch_name,
+                message=self._build_commit_message(change),
+                sha=file_sha,
             )
 
-            commits.append(
-                {
-                    "file_path": file_path,
-                    "commit_sha": (
-                        result.get("commit", {}).get("sha")
-                    ),
-                }
-            )
+            commits.append({
+                "file_path": file_path,
+                "commit_sha": result.get("commit", {}).get("sha"),
+            })
 
         return {
             "branch_name": branch_name,
@@ -116,12 +104,10 @@ class GitHubCodeExecutor:
         }
 
     @staticmethod
-    def _build_commit_message(
-        change: dict,
-    ) -> str:
-        file_path = change.get(
-            "file_path",
-            "repository file",
-        )
+    def _build_commit_message(change: dict) -> str:
+        file_path = change.get("file_path", "repository file")
+
+        if change.get("action") == "create":
+            return f"test: add {file_path}"
 
         return f"feat: update {file_path}"
