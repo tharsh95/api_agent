@@ -1,160 +1,190 @@
+from pathlib import PurePosixPath
+import re
+
 from agent.app.graph.state import AgentState
 
 
-def find_integration(
-    state: AgentState,
-) -> AgentState:
+CONTEXT_FILES = {
+    "package.json", "pyproject.toml", "requirements.txt",
+    "prisma/schema.prisma", "tsconfig.json",
+}
 
+IGNORED_PARTS = {
+    "node_modules", ".git", "dist", "build", "coverage",
+    "__pycache__", ".next", "venv", ".venv",
+}
+
+TEST_PARTS = {"test", "tests", "__tests__", "spec"}
+ENTRY_PARTS = {
+    "routes", "router", "controllers", "controller",
+    "api", "app", "pages",
+}
+SERVICE_PARTS = {
+    "services", "service", "handlers", "usecases", "use_cases",
+}
+MODEL_PARTS = {
+    "models", "entities", "schemas", "dto", "dtos",
+    "repositories", "repository",
+}
+
+GENERIC_TOKENS = {
+    "please", "add", "create", "build", "implement", "make",
+    "develop", "integrate", "support", "feature", "application",
+    "system", "using", "with", "for", "into", "from", "the",
+    "and", "that", "this", "should", "allow", "user", "users",
+    "new", "existing", "want", "need", "able",
+}
+
+PAYMENT_TOKENS = {
+    "stripe", "payment", "payments", "checkout", "billing",
+    "invoice", "subscription", "transaction", "charge",
+}
+
+
+def _tokens(value: str) -> set[str]:
+    value = re.sub(r"([a-z])([A-Z])", r"\\1 \\2", value)
+    return {
+        token.lower()
+        for token in re.findall(r"[a-zA-Z0-9]+", value)
+        if len(token) > 1
+    }
+
+
+def _is_ignored(path: str) -> bool:
+    return bool(set(PurePosixPath(path).parts) & IGNORED_PARTS)
+
+
+def _file_role(path: str) -> set[str]:
+    parts = {part.lower() for part in PurePosixPath(path).parts}
+    roles = set()
+
+    if parts & ENTRY_PARTS:
+        roles.add("entry")
+    if parts & SERVICE_PARTS:
+        roles.add("service")
+    if parts & MODEL_PARTS:
+        roles.add("model")
+    if parts & TEST_PARTS:
+        roles.add("test")
+
+    return roles
+
+
+def find_integration(state: AgentState) -> AgentState:
     files = state.get("repository", {}).get("files", [])
-    request = state["user_request"].lower()
+    request = state.get("user_request", "")
+    request_tokens = _tokens(request)
+
+    # Normalize common domain synonyms and singular/plural forms.
+    if "payments" in request_tokens:
+        request_tokens.add("payment")
+    if "payment" in request_tokens:
+        request_tokens.add("payments")
+
+    if "tasks" in request_tokens:
+        request_tokens.add("task")
+    if "task" in request_tokens:
+        request_tokens.add("tasks")
+
+    domain_tokens = request_tokens - GENERIC_TOKENS
+
+    is_payment = bool(
+        request_tokens & {
+            "stripe", "payment", "payments", "checkout",
+            "billing", "invoice", "subscription"
+        }
+    )
 
     candidates = []
 
-    # Stripe / payment integration
-    if "stripe" in request:
-        for file in files:
-            path = file.get("path", "")
-            content = file.get("content", "")
+    for file in files:
+        path = file.get("path", "")
+        content = file.get("content", "")
 
-            if not path:
-                continue
+        if not path or _is_ignored(path):
+            continue
 
-            lower_path = path.lower()
-            lower_content = content.lower()
+        path_tokens = _tokens(path)
+        content_tokens = _tokens(content)
+        roles = _file_role(path)
 
-            # Documentation should never be selected as an
-            # implementation target.
-            if lower_path.endswith(
-                (".md", ".mdx", ".txt")
-            ):
-                continue
+        # Stripe requests must not select unrelated services.
+        if is_payment:
+            relevant_tokens = domain_tokens & PAYMENT_TOKENS
+            path_matches = relevant_tokens & path_tokens
+            content_matches = relevant_tokens & content_tokens
+        else:
+            path_matches = domain_tokens & path_tokens
+            content_matches = domain_tokens & content_tokens
 
-            if (
-                "payment" in lower_path
-                or "billing" in lower_path
-                or "checkout" in lower_path
-            ):
-                candidates.append({
-                    "file": path,
-                    "reason": (
-                        "This file appears to contain payment "
-                        "or checkout logic and is a likely "
-                        "Stripe integration point."
-                    ),
-                    "confidence": 0.95,
-                })
-                continue
+        score = 0
+        reasons = []
 
-            if (
-                "checkout" in lower_content
-                or "payment" in lower_content
-                or "billing" in lower_content
-            ):
-                candidates.append({
-                    "file": path,
-                    "reason": (
-                        "This file contains payment-related "
-                        "API logic and may need to expose "
-                        "the Stripe integration."
-                    ),
-                    "confidence": 0.85,
-                })
-                continue
+        if path_matches:
+            score += 8 * len(path_matches)
+            reasons.append(
+                "Request terms in path: "
+                + ", ".join(sorted(path_matches))
+            )
 
-            if path == "package.json":
-                candidates.append({
-                    "file": path,
-                    "reason": (
-                        "Package configuration is a likely "
-                        "location for adding the Stripe SDK."
-                    ),
-                    "confidence": 0.80,
-                })
+        if content_matches:
+            score += min(12, 2 * len(content_matches))
+            reasons.append(
+                "Request terms in source: "
+                + ", ".join(sorted(content_matches))
+            )
 
-    # Health-check endpoint
-    elif any(
-        keyword in request
-        for keyword in (
-            "health",
-            "health check",
-            "health-check",
-            "healthcheck",
-        )
-    ):
-        health_keywords = (
-            "health",
-            "app.js",
-            "server.js",
-            "index.js",
-            "routes",
-        )
+        if "entry" in roles:
+            score += 2
+            reasons.append("Application entry point or route")
 
-        for file in files:
-            path = file.get("path", "")
-            content = file.get("content", "")
+        if "service" in roles:
+            score += 3
+            reasons.append("Service or business logic")
 
-            if not path:
-                continue
+        if "model" in roles:
+            score += 2
+            reasons.append("Data model or persistence layer")
 
-            lower_path = path.lower()
-            lower_content = content.lower()
+        if "test" in roles:
+            score += 1
+            reasons.append("Existing test file")
 
-            score = 0.0
-            reason = ""
+        if path in CONTEXT_FILES:
+            score += 1
+            reasons.append("Repository configuration context")
 
-            if "health" in lower_path:
-                score = 0.95
-                reason = "Existing health-related file."
+        # For generic requests, require a meaningful domain match.
+        # Role alone is insufficient to select an unrelated file.
+        if score <= 0:
+            continue
 
-            elif lower_path.endswith("app.js"):
-                score = 0.95
-                reason = (
-                    "Express application file is the appropriate "
-                    "location for the health-check endpoint."
-                )
+        if not is_payment and not (
+            path_matches or content_matches
+        ):
+            continue
 
-            elif lower_path.endswith("server.js"):
-                score = 0.60
-                reason = (
-                    "Server entry point, but the Express application "
-                    "is defined elsewhere."
-                )
+        if is_payment and not (
+            path_matches
+            or content_matches
+            or path in CONTEXT_FILES
+            or "entry" in roles
+        ):
+            continue
 
-            elif lower_path.endswith("index.js"):
-                score = 0.50
-                reason = (
-                    "Possible application entry point for the "
-                    "health-check endpoint."
-                )
-
-            elif (
-                "express()" in lower_content
-                or "app.use(" in lower_content
-                or "app.get(" in lower_content
-            ) and "route" in lower_path:
-                score = 0.75
-                reason = (
-                    "Express route file is a likely "
-                    "location for the health-check endpoint."
-                )
-
-            if score:
-                candidates.append({
-                    "file": path,
-                    "reason": reason,
-                    "confidence": score,
-                })
+        candidates.append({
+            "file": path,
+            "score": score,
+            "role": sorted(roles),
+            "reason": "; ".join(reasons),
+        })
 
     candidates.sort(
-        key=lambda candidate: candidate["confidence"],
-        reverse=True,
+        key=lambda item: (-item["score"], item["file"])
     )
-
-    if "health" in request:
-        candidates = candidates[:1]
 
     return {
         **state,
-        "integration_candidates": candidates[:5],
-        "status": "integration_point_found",
+        "integration_candidates": candidates[:12],
+        "status": "integration_candidates_found",
     }
